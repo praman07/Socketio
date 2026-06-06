@@ -4,6 +4,7 @@ import axios from 'axios';
 const Auth = ({ setToken, setUser }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
@@ -12,7 +13,8 @@ const Auth = ({ setToken, setUser }) => {
     setError('');
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     try {
-      const res = await axios.post(`http://localhost:5000${endpoint}`, { username, password });
+      const payload = isLogin ? { username, password } : { username, password, displayName };
+      const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
       setToken(res.data.token);
       setUser(res.data.user);
       localStorage.setItem('token', res.data.token);
@@ -31,26 +33,38 @@ const Auth = ({ setToken, setUser }) => {
         {error && <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded mb-4">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-400 mb-1">Username</label>
+            <label className="block text-sm font-medium text-gray-400 mb-1">Username (unique ID)</label>
             <input 
               type="text" 
               value={username} 
-              onChange={(e) => setUsername(e.target.value)} 
-              className="w-full bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setUsername(e.target.value.replace(/\s+/g, '').toLowerCase())} 
+              className="w-full bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               required 
             />
           </div>
+          {!isLogin && (
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-1">Display Name</label>
+              <input 
+                type="text" 
+                value={displayName} 
+                onChange={(e) => setDisplayName(e.target.value)} 
+                className="w-full bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                required={!isLogin} 
+              />
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">Password</label>
             <input 
               type="password" 
               value={password} 
               onChange={(e) => setPassword(e.target.value)} 
-              className="w-full bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full bg-gray-700 text-white rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               required 
             />
           </div>
-          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+          <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded transition-colors">
             {isLogin ? 'Login' : 'Sign Up'}
           </button>
         </form>

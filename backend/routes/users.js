@@ -6,7 +6,7 @@ const auth = require('../middleware/auth');
 // Get User Profile
 router.get('/profile/:id', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password').populate('friends', 'username profilePicture status');
+    const user = await User.findById(req.params.id).select('-password').populate('friends', 'username displayName uniqueId profilePicture status lastSeen');
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
   } catch (err) {
@@ -17,12 +17,13 @@ router.get('/profile/:id', auth, async (req, res) => {
 // Update Profile
 router.put('/profile', auth, async (req, res) => {
   try {
-    const { bio, profilePicture } = req.body;
-    const user = await User.findById(req.user.id);
+    const { bio, profilePicture, displayName } = req.body;
+    let user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    if (bio) user.bio = bio;
-    if (profilePicture) user.profilePicture = profilePicture;
+    if (bio !== undefined) user.bio = bio;
+    if (profilePicture !== undefined) user.profilePicture = profilePicture;
+    if (displayName !== undefined) user.displayName = displayName;
 
     await user.save();
     res.json(user);

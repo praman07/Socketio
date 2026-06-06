@@ -7,12 +7,26 @@ const auth = require('../middleware/auth');
 
 // Register
 router.post('/register', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, displayName } = req.body;
   try {
-    let user = await User.findOne({ username });
-    if (user) return res.status(400).json({ message: 'User already exists' });
+    let user = await User.findOne({ username: username.toLowerCase() });
+    if (user) return res.status(400).json({ message: 'Username already taken' });
 
-    user = new User({ username, password });
+    // Generate unique 6-character ID
+    let uniqueId;
+    let isUnique = false;
+    while (!isUnique) {
+      uniqueId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const existing = await User.findOne({ uniqueId });
+      if (!existing) isUnique = true;
+    }
+
+    user = new User({ 
+      username: username.toLowerCase(), 
+      password, 
+      displayName: displayName || username,
+      uniqueId
+    });
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
     await user.save();
@@ -20,7 +34,7 @@ router.post('/register', async (req, res) => {
     const payload = { user: { id: user.id } };
     jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
       if (err) throw err;
-      res.json({ token, user: { id: user.id, username: user.username } });
+      res.json({ token, user: { id: user.id, username: user.username, uniqueId: user.uniqueId, displayName: user.displayName } });
     });
   } catch (err) {
     res.status(500).send('Server error');
@@ -31,7 +45,7 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    let user = await User.findOne({ username });
+    let user = await User.findOne({ username: username.toLowerCase() });
     if (!user) return res.status(400).json({ message: 'Invalid Credentials' });
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -40,7 +54,7 @@ router.post('/login', async (req, res) => {
     const payload = { user: { id: user.id } };
     jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
       if (err) throw err;
-      res.json({ token, user: { id: user.id, username: user.username } });
+      res.json({ token, user: { id: user.id, username: user.username, uniqueId: user.uniqueId, displayName: user.displayName } });
     });
   } catch (err) {
     res.status(500).send('Server error');

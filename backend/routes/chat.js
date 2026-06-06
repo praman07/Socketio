@@ -19,11 +19,11 @@ router.get('/messages/:userId', auth, async (req, res) => {
   }
 });
 
-// Get group messages
-router.get('/groups/:groupId/messages', auth, async (req, res) => {
+// Get channel messages
+router.get('/channels/:channelId/messages', auth, async (req, res) => {
   try {
-    const messages = await Message.find({ group: req.params.groupId })
-      .populate('sender', 'username')
+    const messages = await Message.find({ channel: req.params.channelId })
+      .populate('sender', 'username displayName profilePicture')
       .sort('createdAt');
     res.json(messages);
   } catch (err) {

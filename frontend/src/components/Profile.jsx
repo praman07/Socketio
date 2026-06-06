@@ -4,9 +4,11 @@ import { FiCamera, FiEdit2, FiX } from 'react-icons/fi';
 
 const Profile = ({ token, user, onClose, onUpdate }) => {
   const [bio, setBio] = useState(user.bio || '');
+  const [displayName, setDisplayName] = useState(user.displayName || user.username);
   const [profilePic, setProfilePic] = useState(user.profilePicture || `https://ui-avatars.com/api/?name=${user.username}`);
   const [isUploading, setIsUploading] = useState(false);
-  const ikUploadRef = useRef(null);
+  
+  const fileInputRef = useRef(null);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -18,9 +20,7 @@ const Profile = ({ token, user, onClose, onUpdate }) => {
 
     try {
       const uploadRes = await axios.post('http://localhost:5000/api/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        }
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
       
       const imageUrl = uploadRes.data.url;
@@ -38,75 +38,80 @@ const Profile = ({ token, user, onClose, onUpdate }) => {
     }
   };
 
-  const saveBio = async () => {
+  const handleSave = async () => {
     try {
-      await axios.put('http://localhost:5000/api/users/profile', { bio }, {
+      await axios.put('http://localhost:5000/api/users/profile', { bio, displayName }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      onUpdate({ ...user, bio });
-      alert('Profile updated!');
+      onUpdate({ ...user, bio, displayName });
+      onClose();
     } catch (err) {
       console.error(err);
+      alert('Failed to save profile');
     }
   };
 
   return (
-    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-gray-800 p-8 rounded-2xl w-[400px] border border-gray-700 shadow-2xl relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors">
-          <FiX size={24} />
+    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+      <div className="bg-[#313338] rounded-xl w-[440px] shadow-2xl relative overflow-hidden">
+        
+        {/* Discord Profile Banner */}
+        <div className="h-24 bg-[#5865F2] w-full"></div>
+        
+        <button onClick={onClose} className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 hover:bg-black/40 rounded-full p-1.5 transition-colors z-10">
+          <FiX size={20} />
         </button>
-        
-        <h3 className="text-2xl font-bold mb-6 text-white text-center">Your Profile</h3>
-        
-        <div className="flex flex-col items-center mb-6 relative">
-          <div className="relative group">
-            <img 
-              src={profilePic} 
-              alt="Profile" 
-              className="w-32 h-32 rounded-full object-cover border-4 border-gray-700 group-hover:opacity-50 transition-all"
-            />
+
+        <div className="px-6 pb-6 relative">
+          <div className="relative -mt-12 mb-4 w-24 h-24 rounded-full border-[6px] border-[#313338] bg-[#313338]">
+            <img src={profilePic} alt="Profile" className="w-full h-full rounded-full object-cover" />
             <button 
-              onClick={() => ikUploadRef.current?.click()}
-              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={() => fileInputRef.current?.click()}
+              className="absolute top-0 left-0 w-full h-full bg-black/50 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
             >
-              <FiCamera size={32} className="text-white" />
+              <FiCamera size={24} className="text-white" />
             </button>
-            {isUploading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
-              </div>
-            )}
           </div>
-          <h4 className="mt-4 text-xl font-semibold text-white">@{user.username}</h4>
-        </div>
 
-        <input 
-          type="file" 
-          accept="image/*" 
-          ref={ikUploadRef} 
-          style={{ display: 'none' }} 
-          onChange={handleFileUpload} 
-        />
+          <div className="bg-[#111214] rounded-lg p-4 mb-4 shadow-inner">
+            <h4 className="text-xl font-bold text-[#f2f3f5]">{displayName}</h4>
+            <p className="text-sm text-[#dbdee1]">@{user.username}</p>
+            <div className="w-full h-[1px] bg-[#2b2d31] my-3"></div>
+            
+            <h5 className="text-xs font-bold text-[#b5bac1] uppercase mb-2">Display Name</h5>
+            <input 
+              type="text" 
+              value={displayName} 
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full bg-[#1e1f22] text-[#dbdee1] border border-transparent focus:border-[#5865F2] rounded px-3 py-2 text-sm focus:outline-none transition-colors mb-4"
+              placeholder="Display Name"
+            />
 
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
-            <FiEdit2 /> Bio
-          </label>
-          <textarea 
-            value={bio} 
-            onChange={(e) => setBio(e.target.value)}
-            className="w-full bg-gray-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600 resize-none h-24"
-            placeholder="Tell us about yourself..."
+            <h5 className="text-xs font-bold text-[#b5bac1] uppercase mb-2">About Me</h5>
+            <textarea 
+              value={bio} 
+              onChange={(e) => setBio(e.target.value)}
+              className="w-full bg-[#1e1f22] text-[#dbdee1] border border-transparent focus:border-[#5865F2] rounded px-3 py-2 text-sm focus:outline-none transition-colors resize-none h-20"
+              placeholder="Tell us about yourself"
+            />
+          </div>
+
+          <input 
+            type="file" 
+            accept="image/*" 
+            ref={fileInputRef} 
+            style={{ display: 'none' }} 
+            onChange={handleFileUpload} 
           />
-        </div>
 
-        <button 
-          onClick={saveBio}
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-lg transition-all shadow-lg hover:shadow-blue-500/20"
-        >
-          Save Changes
-        </button>
+          <button 
+            onClick={handleSave}
+            disabled={isUploading}
+            className="w-full bg-[#5865F2] hover:bg-[#4752c4] text-white font-medium py-2.5 rounded transition-colors disabled:opacity-50"
+          >
+            {isUploading ? 'Uploading...' : 'Save Changes'}
+          </button>
+        </div>
       </div>
     </div>
   );

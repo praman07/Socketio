@@ -24,6 +24,7 @@ const upload = multer({ storage: storage });
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const usersRoutes = require('./routes/users');
+const serversRoutes = require('./routes/servers');
 
 const User = require('./models/User');
 const Message = require('./models/Message');
@@ -41,6 +42,7 @@ mongoose.connect(process.env.MONGODB_URI)
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/servers', serversRoutes);
 
 // Static folder for images
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -86,9 +88,9 @@ io.on('connection', async (socket) => {
   await User.findByIdAndUpdate(socket.user.id, { status: 'online' });
   io.emit('userStatusUpdate', { userId: socket.user.id, status: 'online' });
 
-  // Join group rooms
-  socket.on('joinGroups', (groupIds) => {
-    groupIds.forEach(id => socket.join(id));
+  // Join channel rooms
+  socket.on('joinChannels', (channelIds) => {
+    channelIds.forEach(id => socket.join(id));
   });
 
   // Private Message
@@ -101,7 +103,7 @@ io.on('connection', async (socket) => {
       fileUrl
     });
     await msg.save();
-    await msg.populate('sender', 'username');
+    await msg.populate('sender', 'username displayName profilePicture');
 
     // Send to receiver if online
     const receiverSocketId = onlineUsers.get(receiverId);
@@ -112,19 +114,19 @@ io.on('connection', async (socket) => {
     socket.emit('newMessage', msg);
   });
 
-  // Group Message
-  socket.on('groupMessage', async (data) => {
-    const { groupId, content, fileUrl } = data;
+  // Channel Message
+  socket.on('channelMessage', async (data) => {
+    const { channelId, content, fileUrl } = data;
     const msg = new Message({
       sender: socket.user.id,
-      group: groupId,
+      channel: channelId,
       content,
       fileUrl
     });
     await msg.save();
-    await msg.populate('sender', 'username');
+    await msg.populate('sender', 'username displayName profilePicture');
 
-    io.to(groupId).emit('newGroupMessage', msg);
+    io.to(channelId).emit('newChannelMessage', msg);
   });
 
   // Typing indicator
@@ -135,8 +137,8 @@ io.on('connection', async (socket) => {
     }
   });
 
-  socket.on('groupTyping', (data) => {
-    socket.to(data.groupId).emit('typing', { senderId: socket.user.id, groupId: data.groupId, isGroup: true });
+  socket.on('channelTyping', (data) => {
+    socket.to(data.channelId).emit('typing', { senderId: socket.user.id, channelId: data.channelId, isChannel: true });
   });
 
   socket.on('disconnect', async () => {
