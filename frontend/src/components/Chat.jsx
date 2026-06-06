@@ -184,6 +184,8 @@ const Chat = ({ token, user: initialUser, onLogout }) => {
     return false;
   });
 
+  if (!user) return null;
+
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-sans">
       {/* Sidebar */}

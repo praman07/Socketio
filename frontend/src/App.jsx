@@ -22,7 +22,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans">
-      {!token ? (
+      {!token || !user ? (
         <Auth setToken={setToken} setUser={setUser} />
       ) : (
         <Chat token={token} user={user} onLogout={handleLogout} />
