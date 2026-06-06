@@ -1,10 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { IKContext, IKUpload } from 'imagekitio-react';
 import axios from 'axios';
 import { FiCamera, FiEdit2, FiX } from 'react-icons/fi';
-
-const publicKey = "your_public_key_here"; // Will fail gracefully if unchanged
-const urlEndpoint = "https://ik.imagekit.io/your_endpoint_here";
 
 const Profile = ({ token, user, onClose, onUpdate }) => {
   const [bio, setBio] = useState(user.bio || '');
@@ -12,32 +8,33 @@ const Profile = ({ token, user, onClose, onUpdate }) => {
   const [isUploading, setIsUploading] = useState(false);
   const ikUploadRef = useRef(null);
 
-  const authenticator = async () => {
-    try {
-      const response = await axios.get('http://localhost:5000/api/upload/auth');
-      const { signature, expire, token } = response.data;
-      return { signature, expire, token };
-    } catch (error) {
-      throw new Error(`Authentication request failed: ${error.message}`);
-    }
-  };
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  const onError = err => {
-    console.error("Error uploading image", err);
-    setIsUploading(false);
-    alert('Failed to upload image. Ensure your ImageKit credentials are set in the backend .env.');
-  };
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
 
-  const onSuccess = async (res) => {
-    setIsUploading(false);
-    setProfilePic(res.url);
     try {
-      await axios.put('http://localhost:5000/api/users/profile', { profilePicture: res.url }, {
+      const uploadRes = await axios.post('http://localhost:5000/api/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        }
+      });
+      
+      const imageUrl = uploadRes.data.url;
+      setProfilePic(imageUrl);
+      
+      await axios.put('http://localhost:5000/api/users/profile', { profilePicture: imageUrl }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      onUpdate({ ...user, profilePicture: res.url });
+      onUpdate({ ...user, profilePicture: imageUrl });
     } catch (err) {
-      console.error("Failed to save profile pic", err);
+      console.error("Error uploading image", err);
+      alert('Failed to upload image.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -84,17 +81,13 @@ const Profile = ({ token, user, onClose, onUpdate }) => {
           <h4 className="mt-4 text-xl font-semibold text-white">@{user.username}</h4>
         </div>
 
-        <IKContext publicKey={publicKey} urlEndpoint={urlEndpoint} authenticator={authenticator}>
-          <div style={{ display: 'none' }}>
-            <IKUpload 
-              fileName="avatar.png" 
-              onError={onError} 
-              onSuccess={onSuccess} 
-              onUploadStart={() => setIsUploading(true)}
-              ref={ikUploadRef} 
-            />
-          </div>
-        </IKContext>
+        <input 
+          type="file" 
+          accept="image/*" 
+          ref={ikUploadRef} 
+          style={{ display: 'none' }} 
+          onChange={handleFileUpload} 
+        />
 
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">

@@ -5,13 +5,22 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
-const ImageKit = require('imagekit');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
-const imagekit = new ImageKit({
-  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
-  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+// Multer Storage Setup
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = './uploads/';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + path.extname(file.originalname)); // Append extension
+  }
 });
+const upload = multer({ storage: storage });
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const usersRoutes = require('./routes/users');
@@ -33,10 +42,15 @@ app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/users', usersRoutes);
 
-app.get('/api/upload/auth', (req, res) => {
+// Static folder for images
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Local Upload Endpoint
+app.post('/api/upload', upload.single('file'), (req, res) => {
   try {
-    const authenticationParameters = imagekit.getAuthenticationParameters();
-    res.json(authenticationParameters);
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+    const fileUrl = `http://localhost:5000/uploads/${req.file.filename}`;
+    res.json({ url: fileUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

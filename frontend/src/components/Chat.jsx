@@ -1,12 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
-import { IKContext, IKUpload } from 'imagekitio-react';
 import Profile from './Profile';
 import { FiImage, FiSend, FiUser, FiUsers, FiPlus, FiSettings } from 'react-icons/fi';
-
-const publicKey = "your_public_key_here";
-const urlEndpoint = "https://ik.imagekit.io/your_endpoint_here";
 
 const Chat = ({ token, user: initialUser, onLogout }) => {
   const [user, setUser] = useState(initialUser);
@@ -30,14 +26,22 @@ const Chat = ({ token, user: initialUser, onLogout }) => {
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const ikUploadRef = useRef(null);
+  
+  const handleImageUploadSuccess = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  const authenticator = async () => {
+    const formData = new FormData();
+    formData.append('file', file);
+
     try {
-      const response = await axios.get('http://localhost:5000/api/upload/auth');
-      const { signature, expire, token } = response.data;
-      return { signature, expire, token };
-    } catch (error) {
-      throw new Error(`Authentication request failed: ${error.message}`);
+      const uploadRes = await axios.post('http://localhost:5000/api/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      sendMessage(null, uploadRes.data.url);
+    } catch (err) {
+      console.error("Error uploading image", err);
+      alert('Failed to upload image.');
     }
   };
 
@@ -132,8 +136,8 @@ const Chat = ({ token, user: initialUser, onLogout }) => {
     setNewMessage('');
   };
 
-  const handleImageUploadSuccess = (res) => {
-    sendMessage(null, res.url);
+  const handleImageUploadWrapper = (res) => {
+    // keeping signature just in case it's called elsewhere, but changed above
   };
 
   const handleTyping = () => {
@@ -304,11 +308,13 @@ const Chat = ({ token, user: initialUser, onLogout }) => {
             </div>
 
             <div className="p-4 bg-gray-900 border-t border-gray-800">
-              <IKContext publicKey={publicKey} urlEndpoint={urlEndpoint} authenticator={authenticator}>
-                <div style={{ display: 'none' }}>
-                  <IKUpload fileName="chat_image.png" onSuccess={handleImageUploadSuccess} onError={err => alert('Upload failed: ' + err.message)} ref={ikUploadRef} />
-                </div>
-              </IKContext>
+              <input 
+                type="file" 
+                accept="image/*" 
+                ref={ikUploadRef} 
+                style={{ display: 'none' }} 
+                onChange={handleImageUploadSuccess} 
+              />
               <form onSubmit={sendMessage} className="flex gap-3 items-center">
                 <button type="button" onClick={() => ikUploadRef.current?.click()} className="p-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors">
                   <FiImage size={20} />
