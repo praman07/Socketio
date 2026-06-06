@@ -1,41 +1,64 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { IKContext, IKUpload } from 'imagekitio-react';
+import Profile from './Profile';
+import { FiImage, FiSend, FiUser, FiUsers, FiPlus, FiSettings } from 'react-icons/fi';
 
-const Chat = ({ token, user, onLogout }) => {
+const publicKey = "your_public_key_here";
+const urlEndpoint = "https://ik.imagekit.io/your_endpoint_here";
+
+const Chat = ({ token, user: initialUser, onLogout }) => {
+  const [user, setUser] = useState(initialUser);
   const [socket, setSocket] = useState(null);
-  const [users, setUsers] = useState([]);
+  const [friends, setFriends] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [activeChat, setActiveChat] = useState(null); // { type: 'user' | 'group', id, name }
+  const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [onlineStatus, setOnlineStatus] = useState({}); // userId -> { status, lastSeen }
+  const [onlineStatus, setOnlineStatus] = useState({});
   const [typingStatus, setTypingStatus] = useState(null);
+  
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
   
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const ikUploadRef = useRef(null);
 
-  // Initialize Socket and fetch initial data
+  const authenticator = async () => {
+    try {
+      const response = await axios.get('http://localhost:5000/api/upload/auth');
+      const { signature, expire, token } = response.data;
+      return { signature, expire, token };
+    } catch (error) {
+      throw new Error(`Authentication request failed: ${error.message}`);
+    }
+  };
+
   useEffect(() => {
-    const newSocket = io('http://localhost:5000', {
-      auth: { token }
-    });
+    const newSocket = io('http://localhost:5000', { auth: { token } });
     setSocket(newSocket);
 
     const fetchData = async () => {
       const config = { headers: { Authorization: `Bearer ${token}` } };
       try {
-        const [usersRes, groupsRes] = await Promise.all([
+        const [meRes, usersRes, groupsRes] = await Promise.all([
+          axios.get(`http://localhost:5000/api/users/profile/${user.id}`, config),
           axios.get('http://localhost:5000/api/auth/users', config),
           axios.get('http://localhost:5000/api/chat/groups', config)
         ]);
-        setUsers(usersRes.data);
+        
+        setUser(prev => ({ ...prev, profilePicture: meRes.data.profilePicture, bio: meRes.data.bio }));
+        setFriends(meRes.data.friends || []);
+        setAllUsers(usersRes.data);
         setGroups(groupsRes.data);
         
-        // initialize online status
         const initialStatus = {};
         usersRes.data.forEach(u => {
           initialStatus[u._id] = { status: u.status, lastSeen: u.lastSeen };
@@ -52,23 +75,13 @@ const Chat = ({ token, user, onLogout }) => {
     return () => newSocket.close();
   }, [token]);
 
-  // Handle Socket Events
   useEffect(() => {
     if (!socket) return;
-
     socket.on('userStatusUpdate', (data) => {
       setOnlineStatus(prev => ({ ...prev, [data.userId]: { status: data.status, lastSeen: data.lastSeen } }));
     });
-
-    socket.on('newMessage', (msg) => {
-      // If message belongs to active chat, append it
-      setMessages(prev => [...prev, msg]);
-    });
-
-    socket.on('newGroupMessage', (msg) => {
-      setMessages(prev => [...prev, msg]);
-    });
-
+    socket.on('newMessage', (msg) => setMessages(prev => [...prev, msg]));
+    socket.on('newGroupMessage', (msg) => setMessages(prev => [...prev, msg]));
     socket.on('typing', (data) => {
       if (activeChat) {
         if (!data.isGroup && activeChat.type === 'user' && activeChat.id === data.senderId) {
@@ -84,10 +97,7 @@ const Chat = ({ token, user, onLogout }) => {
     });
 
     return () => {
-      socket.off('userStatusUpdate');
-      socket.off('newMessage');
-      socket.off('newGroupMessage');
-      socket.off('typing');
+      socket.off('userStatusUpdate'); socket.off('newMessage'); socket.off('newGroupMessage'); socket.off('typing');
     };
   }, [socket, activeChat]);
 
@@ -110,16 +120,20 @@ const Chat = ({ token, user, onLogout }) => {
     }
   };
 
-  const sendMessage = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !activeChat) return;
+  const sendMessage = (e, fileUrl = null) => {
+    if (e) e.preventDefault();
+    if ((!newMessage.trim() && !fileUrl) || !activeChat) return;
 
     if (activeChat.type === 'user') {
-      socket.emit('privateMessage', { receiverId: activeChat.id, content: newMessage });
+      socket.emit('privateMessage', { receiverId: activeChat.id, content: newMessage, fileUrl });
     } else {
-      socket.emit('groupMessage', { groupId: activeChat.id, content: newMessage });
+      socket.emit('groupMessage', { groupId: activeChat.id, content: newMessage, fileUrl });
     }
     setNewMessage('');
+  };
+
+  const handleImageUploadSuccess = (res) => {
+    sendMessage(null, res.url);
   };
 
   const handleTyping = () => {
@@ -131,30 +145,29 @@ const Chat = ({ token, user, onLogout }) => {
     }
   };
 
+  const addFriend = async (friendId) => {
+    const config = { headers: { Authorization: `Bearer ${token}` } };
+    try {
+      await axios.post(`http://localhost:5000/api/users/friends/${friendId}`, {}, config);
+      const meRes = await axios.get(`http://localhost:5000/api/users/profile/${user.id}`, config);
+      setFriends(meRes.data.friends);
+      setShowAddFriend(false);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error adding friend');
+    }
+  };
+
   const createGroup = async () => {
     if (!newGroupName.trim() || selectedGroupMembers.length === 0) return;
     const config = { headers: { Authorization: `Bearer ${token}` } };
     try {
       const res = await axios.post('http://localhost:5000/api/chat/groups', {
-        name: newGroupName,
-        members: selectedGroupMembers
+        name: newGroupName, members: selectedGroupMembers
       }, config);
       setGroups([...groups, res.data]);
       socket.emit('joinGroups', [res.data._id]);
-      setShowCreateGroup(false);
-      setNewGroupName('');
-      setSelectedGroupMembers([]);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const toggleGroupMember = (userId) => {
-    if (selectedGroupMembers.includes(userId)) {
-      setSelectedGroupMembers(selectedGroupMembers.filter(id => id !== userId));
-    } else {
-      setSelectedGroupMembers([...selectedGroupMembers, userId]);
-    }
+      setShowCreateGroup(false); setNewGroupName(''); setSelectedGroupMembers([]);
+    } catch (err) { console.error(err); }
   };
 
   const filteredMessages = messages.filter(m => {
@@ -168,42 +181,67 @@ const Chat = ({ token, user, onLogout }) => {
   });
 
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100">
+    <div className="flex h-screen bg-gray-900 text-gray-100 font-sans">
       {/* Sidebar */}
-      <div className="w-1/4 border-r border-gray-700 flex flex-col bg-gray-800">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
-          <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">VibeChat</h2>
-          <button onClick={onLogout} className="text-sm text-red-400 hover:text-red-300 transition-colors">Logout</button>
+      <div className="w-80 border-r border-gray-800 flex flex-col bg-gray-900 shadow-xl z-10">
+        <div className="p-5 border-b border-gray-800 flex justify-between items-center bg-gray-900">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setShowProfile(true)}>
+            <img src={user.profilePicture || `https://ui-avatars.com/api/?name=${user.username}`} alt="Me" className="w-10 h-10 rounded-full border-2 border-blue-500/50 hover:border-blue-400 transition-colors" />
+            <div>
+              <h2 className="text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">VibeChat</h2>
+              <p className="text-xs text-gray-400 hover:text-gray-300">@{user.username}</p>
+            </div>
+          </div>
+          <button onClick={onLogout} className="text-xs font-semibold text-gray-500 hover:text-red-400 transition-colors bg-gray-800 hover:bg-gray-800/80 px-3 py-1.5 rounded-full">Logout</button>
         </div>
         
-        <div className="overflow-y-auto flex-1">
-          <div className="p-4">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Groups</h3>
-              <button onClick={() => setShowCreateGroup(true)} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded transition-colors">+</button>
+        <div className="overflow-y-auto flex-1 custom-scrollbar">
+          {/* Friends Section */}
+          <div className="p-4 pt-6">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2"><FiUser /> Friends</h3>
+              <button onClick={() => setShowAddFriend(true)} className="text-gray-400 hover:text-white transition-colors"><FiPlus size={16} /></button>
+            </div>
+            {friends.length === 0 ? (
+              <p className="text-sm text-gray-600 italic px-2">No friends yet.</p>
+            ) : (
+              friends.map(f => (
+                <div 
+                  key={f._id} 
+                  onClick={() => loadChat({ type: 'user', id: f._id, name: f.username, avatar: f.profilePicture })}
+                  className={`p-2.5 rounded-xl cursor-pointer mb-1 flex items-center gap-3 transition-all ${activeChat?.id === f._id ? 'bg-blue-600/10 border border-blue-500/20' : 'hover:bg-gray-800 border border-transparent'}`}
+                >
+                  <div className="relative">
+                    <img src={f.profilePicture || `https://ui-avatars.com/api/?name=${f.username}`} alt={f.username} className="w-10 h-10 rounded-full object-cover" />
+                    <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-gray-900 ${onlineStatus[f._id]?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'}`}></div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-gray-200 truncate">{f.username}</h4>
+                    <p className="text-xs text-gray-500 truncate">{onlineStatus[f._id]?.status === 'online' ? 'Online' : 'Offline'}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Groups Section */}
+          <div className="p-4 border-t border-gray-800/50">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2"><FiUsers /> Groups</h3>
+              <button onClick={() => setShowCreateGroup(true)} className="text-gray-400 hover:text-white transition-colors"><FiPlus size={16} /></button>
             </div>
             {groups.map(g => (
               <div 
                 key={g._id} 
                 onClick={() => loadChat({ type: 'group', id: g._id, name: g.name })}
-                className={`p-3 rounded-lg cursor-pointer mb-1 transition-all ${activeChat?.id === g._id ? 'bg-blue-600/20 border border-blue-500/30' : 'hover:bg-gray-700 border border-transparent'}`}
+                className={`p-2.5 rounded-xl cursor-pointer mb-1 flex items-center gap-3 transition-all ${activeChat?.id === g._id ? 'bg-blue-600/10 border border-blue-500/20' : 'hover:bg-gray-800 border border-transparent'}`}
               >
-                <div className="font-medium text-blue-300"># {g.name}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="p-4 pt-0">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Direct Messages</h3>
-            {users.map(u => (
-              <div 
-                key={u._id} 
-                onClick={() => loadChat({ type: 'user', id: u._id, name: u.username })}
-                className={`p-3 rounded-lg cursor-pointer mb-1 flex items-center justify-between transition-all ${activeChat?.id === u._id ? 'bg-gray-700/80 border border-gray-600' : 'hover:bg-gray-700/50 border border-transparent'}`}
-              >
-                <div className="flex items-center gap-2">
-                  <div className={`w-2.5 h-2.5 rounded-full ${onlineStatus[u._id]?.status === 'online' ? 'bg-green-500' : 'bg-gray-500'}`}></div>
-                  <span className="font-medium text-gray-200">{u.username}</span>
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center font-bold text-white shadow-inner">
+                  #
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-semibold text-gray-200 truncate">{g.name}</h4>
+                  <p className="text-xs text-gray-500 truncate">{g.members?.length || 0} members</p>
                 </div>
               </div>
             ))}
@@ -212,71 +250,109 @@ const Chat = ({ token, user, onLogout }) => {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-gray-900 relative">
+      <div className="flex-1 flex flex-col bg-[#0b0f19] relative">
         {activeChat ? (
           <>
-            {/* Chat Header */}
-            <div className="p-4 border-b border-gray-700 bg-gray-800 shadow-sm flex flex-col">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                {activeChat.type === 'group' && <span className="text-blue-400">#</span>}
-                {activeChat.name}
-              </h2>
-              {activeChat.type === 'user' && onlineStatus[activeChat.id] && (
-                <span className="text-xs text-gray-400">
-                  {onlineStatus[activeChat.id].status === 'online' 
-                    ? 'Online' 
-                    : `Last seen: ${new Date(onlineStatus[activeChat.id].lastSeen).toLocaleString()}`}
-                </span>
-              )}
+            <div className="p-4 border-b border-gray-800 bg-gray-900 shadow-sm flex items-center gap-4 z-10">
+               {activeChat.type === 'user' ? (
+                 <img src={activeChat.avatar || `https://ui-avatars.com/api/?name=${activeChat.name}`} alt="Avatar" className="w-10 h-10 rounded-full object-cover" />
+               ) : (
+                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center font-bold text-white shadow-inner">#</div>
+               )}
+              <div>
+                <h2 className="text-lg font-bold text-white">{activeChat.name}</h2>
+                {activeChat.type === 'user' && onlineStatus[activeChat.id] && (
+                  <span className="text-xs text-gray-400">
+                    {onlineStatus[activeChat.id].status === 'online' 
+                      ? <span className="text-green-400">Online</span> 
+                      : `Last seen: ${new Date(onlineStatus[activeChat.id].lastSeen).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`}
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Messages List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-opacity-5">
               {filteredMessages.map((m, idx) => {
                 const isMine = m.sender?._id === user.id;
+                const showSenderAvatar = !isMine && activeChat.type === 'group';
                 return (
                   <div key={idx} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[70%] rounded-2xl px-4 py-2 ${isMine ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-gray-700 text-gray-100 rounded-bl-sm border border-gray-600'}`}>
-                      {!isMine && activeChat.type === 'group' && (
-                        <div className="text-xs text-blue-300 mb-1 font-medium">{m.sender?.username}</div>
+                    <div className="flex max-w-[75%] gap-2 items-end">
+                      {showSenderAvatar && (
+                        <img src={m.sender?.profilePicture || `https://ui-avatars.com/api/?name=${m.sender?.username}`} className="w-6 h-6 rounded-full mb-1" alt="sender"/>
                       )}
-                      <div>{m.content}</div>
-                      <div className="text-[10px] text-gray-300 mt-1 opacity-70 text-right">
-                        {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                        {showSenderAvatar && <span className="text-[10px] text-gray-400 ml-1 mb-1">{m.sender?.username}</span>}
+                        <div className={`px-4 py-2.5 rounded-2xl shadow-sm ${isMine ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-gray-800 text-gray-100 rounded-bl-sm border border-gray-700'}`}>
+                          {m.fileUrl && (
+                            <img src={m.fileUrl} alt="attachment" className="max-w-full rounded-lg mb-2 cursor-pointer hover:opacity-90 transition-opacity" style={{maxHeight: '300px'}} />
+                          )}
+                          {m.content && <div className="leading-relaxed">{m.content}</div>}
+                          <div className={`text-[10px] mt-1 ${isMine ? 'text-blue-200' : 'text-gray-400'} text-right`}>
+                            {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 );
               })}
               {typingStatus && (
-                <div className="text-xs text-gray-400 italic ml-2">{typingStatus}</div>
+                <div className="text-xs text-gray-400 italic ml-10 animate-pulse">{typingStatus}</div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
-            <div className="p-4 bg-gray-800 border-t border-gray-700">
-              <form onSubmit={sendMessage} className="flex gap-2">
+            <div className="p-4 bg-gray-900 border-t border-gray-800">
+              <IKContext publicKey={publicKey} urlEndpoint={urlEndpoint} authenticator={authenticator}>
+                <div style={{ display: 'none' }}>
+                  <IKUpload fileName="chat_image.png" onSuccess={handleImageUploadSuccess} onError={err => alert('Upload failed: ' + err.message)} ref={ikUploadRef} />
+                </div>
+              </IKContext>
+              <form onSubmit={sendMessage} className="flex gap-3 items-center">
+                <button type="button" onClick={() => ikUploadRef.current?.click()} className="p-3 text-gray-400 hover:text-white hover:bg-gray-800 rounded-full transition-colors">
+                  <FiImage size={20} />
+                </button>
                 <input 
                   type="text" 
                   value={newMessage} 
-                  onChange={(e) => {
-                    setNewMessage(e.target.value);
-                    handleTyping();
-                  }}
+                  onChange={(e) => { setNewMessage(e.target.value); handleTyping(); }}
                   placeholder="Type a message..." 
-                  className="flex-1 bg-gray-700 text-white rounded-full px-6 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 border border-gray-600"
+                  className="flex-1 bg-gray-800 text-white rounded-full px-5 py-3 focus:outline-none focus:ring-1 focus:ring-blue-500 border border-gray-700 placeholder-gray-500 transition-all"
                 />
-                <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white rounded-full px-6 py-3 font-semibold transition-all shadow-lg hover:shadow-blue-500/20">Send</button>
+                <button type="submit" className="p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-full transition-all shadow-lg hover:shadow-blue-500/20 active:scale-95">
+                  <FiSend size={20} />
+                </button>
               </form>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-500 flex-col gap-4">
-            <div className="w-24 h-24 bg-gray-800 rounded-full flex items-center justify-center shadow-inner">
-              <svg className="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+          <div className="flex-1 flex flex-col items-center justify-center text-gray-500 gap-4 opacity-70">
+            <div className="w-24 h-24 bg-gray-800/50 rounded-full flex items-center justify-center shadow-inner">
+              <FiUsers size={40} className="text-gray-600" />
             </div>
-            <p className="text-lg font-medium">Select a chat to start messaging</p>
+            <p className="text-lg font-medium text-gray-400">Select a friend or group to start chatting</p>
+          </div>
+        )}
+
+        {/* Add Friend Modal */}
+        {showAddFriend && (
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-gray-800 p-6 rounded-2xl w-96 border border-gray-700 shadow-2xl">
+              <h3 className="text-xl font-bold mb-4 text-white">Find Friends</h3>
+              <div className="max-h-60 overflow-y-auto space-y-2 custom-scrollbar">
+                {allUsers.filter(u => u._id !== user.id && !friends.some(f => f._id === u._id)).map(u => (
+                  <div key={u._id} className="flex items-center justify-between p-3 hover:bg-gray-700/50 rounded-xl transition-colors">
+                    <div className="flex items-center gap-3">
+                      <img src={u.profilePicture || `https://ui-avatars.com/api/?name=${u.username}`} className="w-8 h-8 rounded-full" alt="user" />
+                      <span className="text-gray-200 font-medium">{u.username}</span>
+                    </div>
+                    <button onClick={() => addFriend(u._id)} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg shadow-sm transition-all">Add</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setShowAddFriend(false)} className="mt-4 w-full py-2 text-sm text-gray-400 hover:text-white transition-colors">Close</button>
+            </div>
           </div>
         )}
 
@@ -284,35 +360,31 @@ const Chat = ({ token, user, onLogout }) => {
         {showCreateGroup && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
             <div className="bg-gray-800 p-6 rounded-2xl w-96 border border-gray-700 shadow-2xl">
-              <h3 className="text-xl font-bold mb-4 text-white">Create New Group</h3>
-              <input 
-                type="text" 
-                placeholder="Group Name" 
-                value={newGroupName} 
-                onChange={(e) => setNewGroupName(e.target.value)}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 mb-4 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <div className="mb-4 max-h-48 overflow-y-auto bg-gray-700/50 rounded-lg p-2 border border-gray-600">
-                <div className="text-xs font-semibold text-gray-400 mb-2 uppercase px-2">Select Members</div>
-                {users.map(u => (
-                  <div key={u._id} className="flex items-center gap-3 p-2 hover:bg-gray-600 rounded cursor-pointer transition-colors" onClick={() => toggleGroupMember(u._id)}>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedGroupMembers.includes(u._id)} 
-                      onChange={() => {}}
-                      className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-500 rounded focus:ring-blue-500 focus:ring-2"
-                    />
+              <h3 className="text-xl font-bold mb-4 text-white">Create Group</h3>
+              <input type="text" placeholder="Group Name" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mb-4 text-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <div className="mb-4 max-h-48 overflow-y-auto bg-gray-900/50 rounded-xl p-2 border border-gray-700 custom-scrollbar">
+                <div className="text-xs font-bold text-gray-500 mb-2 uppercase px-2 tracking-wider">Select Friends</div>
+                {friends.map(u => (
+                  <div key={u._id} className="flex items-center gap-3 p-2 hover:bg-gray-700 rounded-lg cursor-pointer transition-colors" onClick={() => setSelectedGroupMembers(prev => prev.includes(u._id) ? prev.filter(id => id !== u._id) : [...prev, u._id])}>
+                    <input type="checkbox" checked={selectedGroupMembers.includes(u._id)} readOnly className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-500 rounded focus:ring-0 focus:ring-offset-0" />
+                    <img src={u.profilePicture || `https://ui-avatars.com/api/?name=${u.username}`} className="w-6 h-6 rounded-full" alt="user" />
                     <span className="text-sm text-gray-200">{u.username}</span>
                   </div>
                 ))}
               </div>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setShowCreateGroup(false)} className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">Cancel</button>
-                <button onClick={createGroup} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-lg shadow-blue-500/20 transition-all font-medium">Create Group</button>
+                <button onClick={createGroup} className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-md transition-all font-medium">Create Group</button>
               </div>
             </div>
           </div>
         )}
+
+        {/* Profile Modal */}
+        {showProfile && (
+          <Profile token={token} user={user} onClose={() => setShowProfile(false)} onUpdate={(updatedUser) => setUser(updatedUser)} />
+        )}
+
       </div>
     </div>
   );

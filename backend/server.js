@@ -5,9 +5,16 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
+const ImageKit = require('imagekit');
 
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+});
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
+const usersRoutes = require('./routes/users');
 
 const User = require('./models/User');
 const Message = require('./models/Message');
@@ -24,6 +31,16 @@ mongoose.connect(process.env.MONGODB_URI)
 
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/users', usersRoutes);
+
+app.get('/api/upload/auth', (req, res) => {
+  try {
+    const authenticationParameters = imagekit.getAuthenticationParameters();
+    res.json(authenticationParameters);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const io = new Server(server, {
   cors: {
